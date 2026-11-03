@@ -1,0 +1,60 @@
+name: Refresh data and deploy
+
+on:
+  schedule:
+    - cron: '17 */3 * * *'   # every 3 hours, at 17 minutes past
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: refresh
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Run unit tests
+        run: node --test tests/*.test.mjs
+
+      - name: Fetch forecast data
+        run: node scripts/fetch-data.mjs
+
+      - name: Commit data
+        run: |
+          git config user.name "sky-forecast-bot"
+          git config user.email "sky-forecast-bot@users.noreply.github.com"
+          git add data/
+          git diff --cached --quiet || git commit -m "Data refresh $(date -u +%Y-%m-%dT%H:%MZ)"
+          git push || echo "Push skipped (branch moved); data still deployed"
+
+      - name: Assemble site
+        run: |
+          mkdir -p _site
+          cp index.html _site/
+          cp -r data _site/
+          touch _site/.nojekyll
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+      - id: deploy
+        uses: actions/deploy-pages@v4
